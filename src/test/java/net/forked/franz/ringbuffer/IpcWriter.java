@@ -26,15 +26,16 @@ import java.util.concurrent.locks.LockSupport;
 
 public class IpcWriter {
 
-   private static long sequence = 1;
+   private static final int DEFAULT_MSG_TYPE_ID = 1;
+   private static final int DEFAULT_MSG_LENGTH = Long.BYTES;
+   private static final long DEFAULT_MSG_CONTENT = Long.MIN_VALUE;
 
    public static void main(String[] args) throws IOException {
       final int tests = 10;
       final int messages = 100_000_000;
-      final int messageSize = Long.BYTES;
       final File sharedFolder = new File("/dev/shm");
       final String sharedFileName = "shared.ipc";
-      final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.SingleProducerSingleConsumer;
+      final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.MultiProducerSingleConsumer;
       final File sharedFile = new File(sharedFolder, sharedFileName);
       if (!sharedFile.exists()) {
          throw new IllegalStateException("shared file doesn't exists!");
@@ -50,7 +51,7 @@ public class IpcWriter {
          final long start = System.nanoTime();
          long writtenPosition = 0;
          for (int m = 0; m < messages; m++) {
-            while ((writtenPosition = ringBuffer.write(1, messageSize, (msgType, bytes, offset, length, arg) -> bytes.putLong(offset, sequence++), null)) < 0) {
+            while ((writtenPosition = ringBuffer.write(DEFAULT_MSG_TYPE_ID, DEFAULT_MSG_LENGTH, (msgType, bytes, offset, length, arg) -> bytes.putLong(offset, DEFAULT_MSG_CONTENT), null)) < 0) {
                //busy spin
             }
          }

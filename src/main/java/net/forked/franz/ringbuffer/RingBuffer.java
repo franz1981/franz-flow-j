@@ -102,7 +102,7 @@ public interface RingBuffer {
    ByteBuffer buffer();
 
    /**
-    * The position in bytes from start up of the producers.  The figure includes the headers.
+    * The offset in bytes from start up of the producers.  The figure includes the headers.
     * This is the range they are working with but could still be in the act of working with.
     *
     * @return number of bytes produced by the producers in claimed space.
@@ -110,7 +110,7 @@ public interface RingBuffer {
    long producerPosition();
 
    /**
-    * The position in bytes from start up for the consumers.  The figure includes the headers.
+    * The offset in bytes from start up for the consumers.  The figure includes the headers.
     *
     * @return the count of bytes consumed by the consumers.
     */

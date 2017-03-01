@@ -216,7 +216,7 @@ abstract class ScRingBuffer implements RingBuffer {
    }
 
    protected final long loadConsumerPosition() {
-      return UnsafeAccess.UNSAFE.getLongVolatile(bufferObj, bufferAddress + consumerPositionIndex);
+      return UnsafeAccess.UNSAFE.getLong(bufferObj, bufferAddress + consumerPositionIndex);
    }
 
    protected final void storeOrderedConsumerPosition(long value) {

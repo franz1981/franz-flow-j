@@ -17,60 +17,67 @@
 
 package net.forked.franz.ringbuffer;
 
-import java.io.File;
-import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.file.Files;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 
 public class RawRingBufferTest {
 
-   private static final AtomicLong lastMessageId = new AtomicLong();
-   private static long messageId = 0;
+   private static final int DEFAULT_MSG_TYPE_ID = 1;
+   private static final int DEFAULT_MSG_LENGTH = Long.BYTES;
+   private static final long DEFAULT_MSG_CONTENT = Long.MIN_VALUE;
 
    public static void main(String[] args) throws Exception {
       final RingBuffers.RingBufferType type = RingBuffers.RingBufferType.MultiProducerSingleConsumer;
-      final int messages = 10_000_000;
+      final int messages = 100_000_000;
       final int tests = 10;
-      final File file = Files.createTempFile("rb", ".bin").toFile();
-      file.deleteOnExit();
-      final int capacity = RingBuffers.capacity(1024 * Long.BYTES);
-      final MappedByteBuffer bytes = new RandomAccessFile(file, "rw").getChannel().map(FileChannel.MapMode.READ_WRITE, 0, capacity);
+      final int capacity = RingBuffers.capacity(128 * 1024);
+      final int batchSize = 128;
+      final ByteBuffer bytes = ByteBuffer.allocateDirect(capacity);
       bytes.order(ByteOrder.nativeOrder());
       final RingBuffer ringBuffer = RingBuffers.with(type, bytes);
-      final CountDownLatch consumerStarted = new CountDownLatch(1);
       final Thread consumer = new Thread(() -> {
-         consumerStarted.countDown();
-         long count = messages * tests;
-         while (count > 0) {
-            final int read = ringBuffer.read((msgTypeId, buffer, index, length) -> lastMessageId.lazySet(buffer.getLong(index)), Integer.MAX_VALUE);
-            count -= read;
+         long readMessages = 0;
+         long failedRead = 0;
+         long success = 0;
+         final long totalMessages = messages * tests;
+         while (readMessages < totalMessages) {
+            final int read = ringBuffer.read((msgTypeId, buffer, index, length) -> {
+               if (length != DEFAULT_MSG_LENGTH && msgTypeId != DEFAULT_MSG_TYPE_ID && buffer.getLong(index) != DEFAULT_MSG_CONTENT) {
+                  throw new IllegalStateException("INCONSISTENT MESSAGE!");
+               }
+            }, batchSize);
+            if (read == 0) {
+               failedRead++;
+            } else {
+               success++;
+               readMessages += read;
+            }
          }
+         System.out.format("avg batch reads:%d %d/%d failed reads\n", readMessages / success, failedRead, totalMessages);
       });
       consumer.start();
-      consumerStarted.await();
       for (int t = 0; t < tests; t++) {
+         long totalTry = 0;
+         long writtenPosition = 0;
          long start = System.nanoTime();
          for (int i = 0; i < messages; i++) {
 
-            //message.putLong(0,messageId);
-            while (ringBuffer.write(1, Long.BYTES, (msgId, message, index, len, nil) -> {
-               message.putLong(index, messageId);
-            }, null) < 0) {
-
+            while ((writtenPosition = ringBuffer.write(DEFAULT_MSG_TYPE_ID, DEFAULT_MSG_LENGTH, (msgId, message, index, len, nil) -> {
+               message.putLong(index, DEFAULT_MSG_CONTENT);
+            }, null)) < 0) {
+               totalTry++;
             }
-            messageId++;
+            totalTry++;
          }
-         while (lastMessageId.get() != (messageId - 1)) {
+         final long endProduceTime = System.nanoTime();
+         while (ringBuffer.consumerPosition() < writtenPosition) {
             LockSupport.parkNanos(1L);
          }
-         //wait until the last callback of the test is processed
-         final long elapsed = System.nanoTime() - start;
-         System.out.println((messages * 1000000000L) / elapsed + " ops/sec");
+         final long endTime = System.nanoTime();
+         final long waitNanos = endTime - endProduceTime;
+         final long elapsedNanos = endTime - start;
+         System.out.format("[%d] %dM ops/sec %d/%d failed tries end latency:%d ns\n", Thread.currentThread().getId(), (messages * 1000L) / elapsedNanos, totalTry - messages, messages, waitNanos);
 
       }
    }

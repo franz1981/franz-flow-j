@@ -23,37 +23,38 @@ import java.io.RandomAccessFile;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
-public class IpcReader {
+import net.forked.franz.ringbuffer.utils.BytesUtils;
 
-   static long readMessages = 0;
-   static long failedRead = 0;
-   static long success = 0;
+public class IpcCounter {
 
    public static void main(String[] args) throws IOException {
-      final int requiredCapacity = 128 * 1024;
-      final int maxBatchSize = 1024;
       final File sharedFolder = new File("/dev/shm");
       final String sharedFileName = "shared.ipc";
       final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.MultiProducerSingleConsumer;
       final File sharedFile = new File(sharedFolder, sharedFileName);
-      final int capacity = RingBuffers.capacity(requiredCapacity);
-      final MappedByteBuffer bytes = new RandomAccessFile(sharedFile, "rw").getChannel().map(FileChannel.MapMode.READ_WRITE, 0, capacity);
+      while (!sharedFile.exists()) {
+         System.out.println("...waiting that " + sharedFile + " will be created...");
+         LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(5));
+      }
+      final MappedByteBuffer bytes = new RandomAccessFile(sharedFile, "rw").getChannel().map(FileChannel.MapMode.READ_WRITE, 0, sharedFile.length());
       bytes.order(ByteOrder.nativeOrder());
       final RingBuffer ringBuffer = RingBuffers.with(ringBufferType, bytes);
-      Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-         System.out.format("avg batch reads:%d %d/%d failed reads\n", readMessages / success, failedRead, readMessages);
-      }));
+      final int messageSize = (int) BytesUtils.align(ringBuffer.headerSize() + Long.BYTES, ringBuffer.messageAlignment());
+      long lastTime = System.currentTimeMillis();
+      long lastBytes = ringBuffer.consumerPosition();
       while (true) {
-         final int read = ringBuffer.read((msgTypeId, buffer, index, length) -> {
-         }, maxBatchSize);
-         if (read == 0) {
-            failedRead++;
-         } else {
-            success++;
-            readMessages += read;
-         }
+         LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
+         final long time = System.currentTimeMillis();
+         final long bytez = ringBuffer.consumerPosition();
+         final long elapsedTime = time - lastTime;
+         final long bytesConsumed = bytez - lastBytes;
+         System.out.format("elapsed %dms\t%,d messages\t%,d bytes%n", elapsedTime, bytesConsumed / messageSize, bytesConsumed);
+         lastTime = time;
+         lastBytes = bytez;
       }
-
    }
+
 }

@@ -24,12 +24,27 @@ import net.forked.franz.ringbuffer.utils.BytesUtils;
 
 public final class RingBuffers {
 
+   private static final int DEFAULT_CYCLES = 2;
+
    private RingBuffers() {
 
    }
 
    public static int capacity(int bytes) {
       return RingBufferLayout.capacity(bytes);
+   }
+
+   public static int cyclicCapacity(int bytes) {
+      return cyclicCapacity(bytes, DEFAULT_CYCLES);
+   }
+
+   public static int cyclicCapacity(int bytes, int cycles) {
+      final int pow2Cycles = BytesUtils.nextPowOf2(cycles);
+      final int ringBufferCapacity = BytesUtils.nextPowOf2(bytes) + MpscCycleRingBuffer.RingBufferLayout.trailerLength(pow2Cycles);
+      if (ringBufferCapacity < 0) {
+         throw new IllegalArgumentException("requestedCapacity is too big!");
+      }
+      return ringBufferCapacity;
    }
 
    public static <T> RefRingBuffer<T> withRef(RingBufferType type, ByteBuffer bytes, Supplier<? extends T> refFactory) {
@@ -44,6 +59,15 @@ public final class RingBuffers {
       final int messageAlignment = messageAlignment(averageMessageLength);
       final ScRingBuffer ringBuffer = with(type, bytes, messageAlignment);
       return new RefScRingBufferWrapper<>(ringBuffer, refFactory);
+   }
+
+   public static RingBuffer cyclic(ByteBuffer bytes) {
+      return cyclic(bytes, DEFAULT_CYCLES);
+   }
+
+   public static RingBuffer cyclic(ByteBuffer bytes, int cycles) {
+      final int messageAlignment = MessageLayout.DEFAULT_ALIGNMENT;
+      return new MpscCycleRingBuffer(bytes, messageAlignment, cycles);
    }
 
    public static RingBuffer with(RingBufferType type, ByteBuffer bytes) {
