@@ -33,12 +33,12 @@ public class RawRefRingBufferTest {
    private static long messageId = 0;
 
    public static void main(String[] args) throws Exception {
-      final RingBuffers.RingBufferType type = RingBuffers.RingBufferType.MultiProducerSingleConsumer;
+      final RingBuffers.RingBufferType type = RingBuffers.RingBufferType.SingleProducerSingleConsumer;
       final int messages = 10_000_000;
       final int tests = 10;
       final File file = Files.createTempFile("rb", ".bin").toFile();
       file.deleteOnExit();
-      final int capacity = RingBuffers.capacity(1024, Long.BYTES);
+      final int capacity = RingBuffers.capacity(type, 1024, Long.BYTES);
       final MappedByteBuffer bytes = new RandomAccessFile(file, "rw").getChannel().map(FileChannel.MapMode.READ_WRITE, 0, capacity);
       bytes.order(ByteOrder.nativeOrder());
       final RefRingBuffer<MessageIdHolder> ringBuffer = RingBuffers.withRef(type, bytes, MessageIdHolder::new, Long.BYTES);

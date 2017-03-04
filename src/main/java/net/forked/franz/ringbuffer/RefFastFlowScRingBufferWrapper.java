@@ -22,15 +22,15 @@ import java.util.function.Supplier;
 
 import net.forked.franz.ringbuffer.utils.BytesUtils;
 
-final class RefScRingBufferWrapper<T> implements RefRingBuffer<T> {
+final class RefFastFlowScRingBufferWrapper<T> implements RefRingBuffer<T> {
 
-   private final ScRingBuffer ringBuffer;
+   private final FastFlowScRingBuffer ringBuffer;
    private final T[] refs;
    private final int refCapacity;
    private final int log2messageAlignment;
 
    @SuppressWarnings("unchecked")
-   RefScRingBufferWrapper(final ScRingBuffer ringBuffer, final Supplier<? extends T> refFactory) {
+   RefFastFlowScRingBufferWrapper(final FastFlowScRingBuffer ringBuffer, final Supplier<? extends T> refFactory) {
       this.ringBuffer = ringBuffer;
       if (!BytesUtils.isPowOf2(ringBuffer.messageAlignment())) {
          throw new IllegalArgumentException("the ring buffer used do not have a power of 2 's messageAlignment");
@@ -128,7 +128,7 @@ final class RefScRingBufferWrapper<T> implements RefRingBuffer<T> {
    @Override
    public int read(MessageRefConsumer<? super T> consumer, int messageCountLimit) {
       int msgRead = 0;
-      final ScRingBuffer ringBuffer = this.ringBuffer;
+      final FastFlowScRingBuffer ringBuffer = this.ringBuffer;
       final ByteBuffer buffer = ringBuffer.buffer();
       final int capacity = ringBuffer.capacity();
       final int messageAlignment = ringBuffer.messageAlignment();
@@ -150,7 +150,7 @@ final class RefScRingBufferWrapper<T> implements RefRingBuffer<T> {
             final int requiredMsgLength = (int) BytesUtils.align(msgLength, messageAlignment);
             bytesConsumed += requiredMsgLength;
             final int msgTypeId = MessageLayout.msgTypeId(msgHeader);
-            if (msgTypeId != ScRingBuffer.PADDING_MSG_TYPE_ID) {
+            if (msgTypeId != FastFlowScRingBuffer.PADDING_MSG_TYPE_ID) {
                msgRead++;
                final int msgContentLength = msgLength - MessageLayout.HEADER_LENGTH;
                final int msgContentIndex = msgIndex + MessageLayout.HEADER_LENGTH;

@@ -31,18 +31,22 @@ public class IpcReader {
    static long success = 0;
 
    public static void main(String[] args) throws IOException {
-      final int requiredCapacity = 128 * 1024;
+      final int requiredCapacity = 1024 * 1024;
       final int maxBatchSize = 1024;
       final File sharedFolder = new File("/dev/shm");
       final String sharedFileName = "shared.ipc";
-      final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.MultiProducerSingleConsumer;
+      final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.RelaxedMultiProducerSingleConsumer;
       final File sharedFile = new File(sharedFolder, sharedFileName);
-      final int capacity = RingBuffers.capacity(requiredCapacity);
+      sharedFile.delete();
+      sharedFile.deleteOnExit();
+      final int capacity = RingBuffers.capacity(ringBufferType, requiredCapacity);
       final MappedByteBuffer bytes = new RandomAccessFile(sharedFile, "rw").getChannel().map(FileChannel.MapMode.READ_WRITE, 0, capacity);
       bytes.order(ByteOrder.nativeOrder());
       final RingBuffer ringBuffer = RingBuffers.with(ringBufferType, bytes);
       Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-         System.out.format("avg batch reads:%d %d/%d failed reads\n", readMessages / success, failedRead, readMessages);
+         if (success > 0) {
+            System.out.format("avg batch reads:%d %d/%d failed reads\n", readMessages / success, failedRead, readMessages);
+         }
       }));
       while (true) {
          final int read = ringBuffer.read((msgTypeId, buffer, index, length) -> {

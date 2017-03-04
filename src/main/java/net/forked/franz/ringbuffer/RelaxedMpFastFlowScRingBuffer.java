@@ -23,20 +23,11 @@ import net.forked.franz.ringbuffer.utils.BytesUtils;
 import net.forked.franz.ringbuffer.utils.UnsafeAccess;
 import sun.misc.Unsafe;
 
-final class MpscCycleRingBuffer implements RingBuffer {
+final class RelaxedMpFastFlowScRingBuffer extends FastFlowScRingBuffer {
 
-   /**
-    * RingBuffer could contain a pad to prevent fragmentation of long messages.
-    */
-   public static final int PADDING_MSG_TYPE_ID = -1;
-   /**
-    * RingBuffer has insufficient capacity to write a message.
-    */
    private final int capacity;
-   private final int mask;
    private final int maxMsgLength;
    private final int maxGain;
-   private final int maskCycleLength;
    private final int cycleLength;
    private final int maskCycles;
    private final int cycles;
@@ -49,7 +40,7 @@ final class MpscCycleRingBuffer implements RingBuffer {
    private final long bufferAddress;
    private final int messageAlignment;
 
-   public MpscCycleRingBuffer(final ByteBuffer buffer, final int messageAlignment, final int cycles) {
+   public RelaxedMpFastFlowScRingBuffer(final ByteBuffer buffer, final int messageAlignment, final int cycles) {
       if (cycles < 2) {
          throw new IllegalStateException("cycle must be > 1!");
       }
@@ -69,13 +60,11 @@ final class MpscCycleRingBuffer implements RingBuffer {
       if (!BytesUtils.isPowOf2(this.capacity)) {
          throw new IllegalStateException("capacity must be a power of 2!");
       }
-      this.mask = this.capacity - 1;
       if (!BytesUtils.isAligned(this.capacity, this.messageAlignment)) {
          throw new IllegalStateException("the capacity must be aligned to messageAlignment!");
       }
       this.cycleLength = this.capacity / this.cycles;
       //cycleLength is by definition a power of 2!!!
-      this.maskCycleLength = this.cycleLength - 1;
       //No producers can claim positions in the same cycle index of the consumer.
       //if the back-pressure fails to stop a producer, it won't succeed to claim more than the cycle limit:
       //if the claim reaches the cycle limit it will cause a cycle rotation (that refreshes the current cycle offset for any producers)
@@ -98,22 +87,11 @@ final class MpscCycleRingBuffer implements RingBuffer {
    }
 
    @Override
-   public int headerSize() {
-      return MessageLayout.HEADER_LENGTH;
-   }
-
-   @Override
    public int capacity() {
       return this.capacity;
    }
 
-   protected final void checkMsgLength(final int length) {
-      if (length > maxMsgLength) {
-         throw new IllegalArgumentException(String.format("message content exceeds maxMessageLength of %d, length=%d", maxMsgLength, length));
-      }
-   }
-
-   private final long writeAcquire(final int requiredCapacity) {
+   protected long writeAcquire(final int requiredCapacity) {
       final int maxGain = this.maxGain;
       final int cycleLength = this.cycleLength;
 
@@ -124,7 +102,7 @@ final class MpscCycleRingBuffer implements RingBuffer {
       final long expectedNextProducerPosition = producerPosition + requiredCapacity;
       if (expectedNextProducerPosition >= claimLimit) {
          if (isBackpressured(expectedNextProducerPosition, maxGain)) {
-            return -1;
+            return FULL;
          }
       }
       //try to claim on the current active cycle
@@ -137,14 +115,14 @@ final class MpscCycleRingBuffer implements RingBuffer {
          if (cyclePosition <= cycleLength) {
             padAndRotateCycle(activeCycleIndex, RingBufferLayout.cycleId(startingProducerCycleClaim), cyclePosition, cycleLength);
          }
-         return -1;
+         return BACK_PRESSURED;
       } else {
          //all goes straight, return the absolute claimed position
          return RingBufferLayout.producerPosition(startingProducerCycleClaim, cycleLength);
       }
    }
 
-   private final void padAndRotateCycle(int activeCycleIndex, long cycleId, long cyclePosition, int cycleLength) {
+   private void padAndRotateCycle(int activeCycleIndex, long cycleId, long cyclePosition, int cycleLength) {
       //is it needed a pad?
       if (cyclePosition < cycleLength) {
          final int padLength = (int) (cycleLength - cyclePosition);
@@ -162,11 +140,7 @@ final class MpscCycleRingBuffer implements RingBuffer {
       storeOrderedActiveCycleIndex(nextActiveCycleIndex);
    }
 
-   protected final void storeOrderedMsgHeader(int messageIndex, long header) {
-      UnsafeAccess.UNSAFE.putOrderedLong(bufferObj, bufferAddress + messageIndex, header);
-   }
-
-   private final boolean isBackpressured(final long producerPosition, final int maxGain) {
+   private boolean isBackpressured(final long producerPosition, final int maxGain) {
       //load volatile is necessary only for atomicity
       final long consumerPosition = loadVolatileConsumerPosition();
       final long claimLimit = consumerPosition + maxGain;
@@ -179,137 +153,45 @@ final class MpscCycleRingBuffer implements RingBuffer {
       }
    }
 
-   @Override
-   public long write(int msgTypeId, ByteBuffer srcBuffer, int srcIndex, int length) {
-      MessageLayout.checkMsgTypeId(msgTypeId);
-      checkMsgLength(length);
-      final int msgLength = length + MessageLayout.HEADER_LENGTH;
-      final int requiredMsgCapacity = (int) BytesUtils.align(msgLength, this.messageAlignment);
-      final long acquireResult = writeAcquire(requiredMsgCapacity);
-      if (acquireResult >= 0) {
-         final long producerStartPosition = acquireResult;
-         final int msgIndex = (int) (producerStartPosition & mask);
-         final int msgContentIndex = MessageLayout.msgContentOffset(msgIndex);
-         final long msgContentAddress = bufferAddress + msgContentIndex;
-         BytesUtils.copy(srcBuffer, srcIndex, bufferObj, msgContentAddress, length);
-         //WriteWrite
-         storeOrderedMsgHeader(msgIndex, MessageLayout.packHeaderWith(msgTypeId, msgLength));
-         return producerStartPosition + requiredMsgCapacity;
-      } else {
-         return acquireResult;
-      }
-   }
-
-   @Override
-   public <A> long write(int msgTypeId, int length, MessageTranslator<? super A> translator, A arg) {
-      MessageLayout.checkMsgTypeId(msgTypeId);
-      checkMsgLength(length);
-      final int msgLength = length + MessageLayout.HEADER_LENGTH;
-      final int requiredMsgCapacity = (int) BytesUtils.align(msgLength, this.messageAlignment);
-      final long acquireResult = writeAcquire(requiredMsgCapacity);
-      if (acquireResult >= 0) {
-         final long producerStartPosition = acquireResult;
-         final int msgIndex = (int) (producerStartPosition & mask);
-         final int msgContentIndex = MessageLayout.msgContentOffset(msgIndex);
-         translator.translate(msgTypeId, buffer, msgContentIndex, length, arg);
-         //WriteWrite
-         storeOrderedMsgHeader(msgIndex, MessageLayout.packHeaderWith(msgTypeId, msgLength));
-         return producerStartPosition + requiredMsgCapacity;
-      } else {
-         return acquireResult;
-      }
-   }
-
-   @Override
-   public int read(MessageConsumer consumer) {
-      return read(consumer, Integer.MAX_VALUE);
-   }
-
-   /**
-    * {@inheritDoc}
-    */
-   @Override
-   public final int read(final MessageConsumer consumer, final int count) {
-      int msgRead = 0;
-      final ByteBuffer buffer = this.buffer;
-      final int capacity = this.capacity;
-      final int messageAlignment = this.messageAlignment;
-      final long consumerPosition = loadConsumerPosition();
-      final int consumerIndex = (int) consumerPosition & this.mask;
-      final int remainingBytes = capacity - consumerIndex;
-      int bytesConsumed = 0;
-      try {
-         while ((bytesConsumed < remainingBytes) && (msgRead < count)) {
-            final int msgIndex = consumerIndex + bytesConsumed;
-            final long msgHeader = loadVolatileMsgHeader(msgIndex);
-            //LoadLoad + LoadStore
-            final int msgLength = MessageLayout.length(msgHeader);
-            if (msgLength <= 0) {
-               break;
-            }
-            final int requiredMsgLength = (int) BytesUtils.align(msgLength, messageAlignment);
-            bytesConsumed += requiredMsgLength;
-            final int msgTypeId = MessageLayout.msgTypeId(msgHeader);
-            if (msgTypeId != PADDING_MSG_TYPE_ID) {
-               msgRead++;
-               final int msgContentLength = msgLength - MessageLayout.HEADER_LENGTH;
-               final int msgContentIndex = msgIndex + MessageLayout.HEADER_LENGTH;
-               consumer.accept(msgTypeId, buffer, msgContentIndex, msgContentLength);
-            }
-         }
-      } finally {
-         if (bytesConsumed != 0) {
-            //zeros all the consumed bytes
-            BytesUtils.zeros(buffer, consumerIndex, bytesConsumed);
-            final long newConsumerPosition = consumerPosition + bytesConsumed;
-            //StoreStore + LoadStore
-            storeOrderedConsumerPosition(newConsumerPosition);
-         }
-      }
-      return msgRead;
-   }
-
-   private final int loadVolatileActiveCycleIndex() {
+   private int loadVolatileActiveCycleIndex() {
       return UnsafeAccess.UNSAFE.getIntVolatile(bufferObj, bufferAddress + activeCycleIndex);
    }
 
-   private final void storeOrderedActiveCycleIndex(int cycleIndex) {
+   private void storeOrderedActiveCycleIndex(int cycleIndex) {
       UnsafeAccess.UNSAFE.putOrderedInt(bufferObj, bufferAddress + activeCycleIndex, cycleIndex);
    }
 
-   private final long loadVolatileProducerCycleClaim(final int cycleIndex) {
+   private long loadVolatileProducerCycleClaim(final int cycleIndex) {
       return UnsafeAccess.UNSAFE.getLongVolatile(bufferObj, bufferAddress + producerCycleClaimIndex[cycleIndex]);
    }
 
-   private final long getAndAddProducerCycleClaim(final int cycleIndex, long delta) {
+   private long getAndAddProducerCycleClaim(final int cycleIndex, long delta) {
       return UnsafeAccess.UNSAFE.getAndAddLong(bufferObj, bufferAddress + producerCycleClaimIndex[cycleIndex], delta);
    }
 
-   private final void storeProducerCycleClaim(final int cycleIndex, long value) {
+   private void storeProducerCycleClaim(final int cycleIndex, long value) {
       UnsafeAccess.UNSAFE.putLong(bufferObj, bufferAddress + producerCycleClaimIndex[cycleIndex], value);
    }
 
-   private final void storeConsumerCachePosition(long value) {
+   private void storeConsumerCachePosition(long value) {
       UnsafeAccess.UNSAFE.putLong(bufferObj, bufferAddress + consumerCachePositionIndex, value);
    }
 
-   private final long loadConsumerCachePosition() {
+   private long loadConsumerCachePosition() {
       return UnsafeAccess.UNSAFE.getLong(bufferObj, bufferAddress + consumerCachePositionIndex);
    }
 
-   private final long loadVolatileMsgHeader(int msgIndex) {
-      return UnsafeAccess.UNSAFE.getLongVolatile(bufferObj, bufferAddress + msgIndex);
-   }
-
-   private final long loadVolatileConsumerPosition() {
+   private long loadVolatileConsumerPosition() {
       return UnsafeAccess.UNSAFE.getLongVolatile(bufferObj, bufferAddress + consumerPositionIndex);
    }
 
-   private final long loadConsumerPosition() {
+   @Override
+   protected long loadConsumerPosition() {
       return UnsafeAccess.UNSAFE.getLong(bufferObj, bufferAddress + consumerPositionIndex);
    }
 
-   private final void storeOrderedConsumerPosition(long value) {
+   @Override
+   protected void storeOrderedConsumerPosition(long value) {
       UnsafeAccess.UNSAFE.putOrderedLong(bufferObj, bufferAddress + consumerPositionIndex, value);
    }
 
@@ -324,6 +206,16 @@ final class MpscCycleRingBuffer implements RingBuffer {
    }
 
    @Override
+   protected long bufferAddress() {
+      return bufferAddress;
+   }
+
+   @Override
+   protected Object bufferObj() {
+      return bufferObj;
+   }
+
+   @Override
    public long producerPosition() {
       final int activeCycleIndex = loadVolatileActiveCycleIndex();
       final long producerCycleClaim = loadVolatileProducerCycleClaim(activeCycleIndex);
@@ -333,11 +225,6 @@ final class MpscCycleRingBuffer implements RingBuffer {
    @Override
    public long consumerPosition() {
       return loadVolatileConsumerPosition();
-   }
-
-   @Override
-   public int size() {
-      return (int) (producerPosition() - consumerPosition());
    }
 
    static final class RingBufferLayout {
@@ -396,6 +283,15 @@ final class MpscCycleRingBuffer implements RingBuffer {
       public static int trailerLength(final int cycles) {
          final int trailerLength = PRODUCERS_CYCLE_CLAIM_OFFSET + (int) BytesUtils.align(BytesUtils.nextPowOf2(cycles) * Long.BYTES, BytesUtils.CACHE_LINE_LENGTH * 2);
          return trailerLength;
+      }
+
+      public static int capacity(int bytes, int cycles) {
+         final int pow2Cycles = BytesUtils.nextPowOf2(cycles);
+         final int ringBufferCapacity = BytesUtils.nextPowOf2(bytes) + trailerLength(pow2Cycles);
+         if (ringBufferCapacity < 0) {
+            throw new IllegalArgumentException("requestedCapacity is too big!");
+         }
+         return ringBufferCapacity;
       }
    }
 }

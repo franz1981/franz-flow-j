@@ -33,7 +33,7 @@ public class IpcCounter {
    public static void main(String[] args) throws IOException {
       final File sharedFolder = new File("/dev/shm");
       final String sharedFileName = "shared.ipc";
-      final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.MultiProducerSingleConsumer;
+      final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.RelaxedMultiProducerSingleConsumer;
       final File sharedFile = new File(sharedFolder, sharedFileName);
       while (!sharedFile.exists()) {
          System.out.println("...waiting that " + sharedFile + " will be created...");

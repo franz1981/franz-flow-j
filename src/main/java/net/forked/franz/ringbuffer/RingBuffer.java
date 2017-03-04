@@ -26,6 +26,8 @@ public interface RingBuffer {
 
    long FULL = -2;
 
+   long BACK_PRESSURED = -1;
+
    /**
     * The size in bytes of the messages alignment.
     *

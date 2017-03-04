@@ -28,10 +28,10 @@ public class RawRingBufferTest {
    private static final long DEFAULT_MSG_CONTENT = Long.MIN_VALUE;
 
    public static void main(String[] args) throws Exception {
-      final RingBuffers.RingBufferType type = RingBuffers.RingBufferType.MultiProducerSingleConsumer;
+      final RingBuffers.RingBufferType type = RingBuffers.RingBufferType.SingleProducerSingleConsumer;
       final int messages = 100_000_000;
       final int tests = 10;
-      final int capacity = RingBuffers.capacity(128 * 1024);
+      final int capacity = RingBuffers.capacity(type, 128 * 1024);
       final int batchSize = 128;
       final ByteBuffer bytes = ByteBuffer.allocateDirect(capacity);
       bytes.order(ByteOrder.nativeOrder());

@@ -77,10 +77,10 @@ public class TcpBatchSender {
          networkBuffer = byteBuffer.slice();
          networkBuffer.order(ByteOrder.nativeOrder());
       }
-      final int totalSize = RingBuffers.capacity(capacity) + UnsafeAccess.UNSAFE.pageSize();
+      final int totalSize = RingBuffers.capacity(ringBufferType, capacity) + UnsafeAccess.UNSAFE.pageSize();
       ByteBuffer ringBufferBytes = ByteBuffer.allocateDirect(totalSize);
       ringBufferBytes.position(BytesUtils.alignedIndex(ringBufferBytes, 0, UnsafeAccess.UNSAFE.pageSize()));
-      ringBufferBytes.limit(ringBufferBytes.position() + RingBuffers.capacity(capacity));
+      ringBufferBytes.limit(ringBufferBytes.position() + RingBuffers.capacity(ringBufferType, capacity));
       ringBufferBytes = ringBufferBytes.slice();
       final AtomicLong works = new AtomicLong(0);
       final RingBuffer networkRingBuffer = RingBuffers.with(ringBufferType, ringBufferBytes);

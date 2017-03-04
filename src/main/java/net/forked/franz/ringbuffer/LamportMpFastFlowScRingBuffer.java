@@ -23,14 +23,14 @@ import java.nio.ByteBuffer;
  * A ring-buffer that supports the exchange of messages from many producers to a single consumer.
  */
 
-final class MpscRingBuffer extends ScRingBuffer {
+final class LamportMpFastFlowScRingBuffer extends LamportProducerFastFlowScRingBuffer {
 
-   MpscRingBuffer(final ByteBuffer buffer, int messageAlignment) {
+   LamportMpFastFlowScRingBuffer(final ByteBuffer buffer, int messageAlignment) {
       super(buffer, messageAlignment);
    }
 
    @Override
-   protected long writeAcquire(final int requiredCapacity) {
+   protected final long writeAcquire(final int requiredCapacity) {
       final int capacity = this.capacity();
       final int mask = capacity - 1;
       long consumerPosition = loadConsumerCachePosition();

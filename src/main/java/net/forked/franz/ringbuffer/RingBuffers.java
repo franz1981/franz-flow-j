@@ -30,26 +30,26 @@ public final class RingBuffers {
 
    }
 
-   public static int capacity(int bytes) {
-      return RingBufferLayout.capacity(bytes);
-   }
+   public static int capacity(RingBufferType type, int bytes) {
+      switch (type) {
 
-   public static int cyclicCapacity(int bytes) {
-      return cyclicCapacity(bytes, DEFAULT_CYCLES);
-   }
-
-   public static int cyclicCapacity(int bytes, int cycles) {
-      final int pow2Cycles = BytesUtils.nextPowOf2(cycles);
-      final int ringBufferCapacity = BytesUtils.nextPowOf2(bytes) + MpscCycleRingBuffer.RingBufferLayout.trailerLength(pow2Cycles);
-      if (ringBufferCapacity < 0) {
-         throw new IllegalArgumentException("requestedCapacity is too big!");
+         case SingleProducerSingleConsumer:
+            return LamportSpFastFlowScRingBuffer.RingBufferLayout.capacity(bytes);
+         case MultiProducerSingleConsumer:
+            return LamportSpFastFlowScRingBuffer.RingBufferLayout.capacity(bytes);
+         case RelaxedMultiProducerSingleConsumer:
+            return RelaxedMpFastFlowScRingBuffer.RingBufferLayout.capacity(bytes, DEFAULT_CYCLES);
       }
-      return ringBufferCapacity;
+      throw new AssertionError("case not exists!");
+   }
+
+   public static int relaxedCapacity(int bytes, int cycles) {
+      return RelaxedMpFastFlowScRingBuffer.RingBufferLayout.capacity(bytes, cycles);
    }
 
    public static <T> RefRingBuffer<T> withRef(RingBufferType type, ByteBuffer bytes, Supplier<? extends T> refFactory) {
-      final ScRingBuffer ringBuffer = with(type, bytes, MessageLayout.DEFAULT_ALIGNMENT);
-      return new RefScRingBufferWrapper<>(ringBuffer, refFactory);
+      final FastFlowScRingBuffer ringBuffer = with(type, bytes, MessageLayout.DEFAULT_ALIGNMENT);
+      return new RefFastFlowScRingBufferWrapper<>(ringBuffer, refFactory);
    }
 
    public static <T> RefRingBuffer<T> withRef(RingBufferType type,
@@ -57,17 +57,13 @@ public final class RingBuffers {
                                               Supplier<? extends T> refFactory,
                                               int averageMessageLength) {
       final int messageAlignment = messageAlignment(averageMessageLength);
-      final ScRingBuffer ringBuffer = with(type, bytes, messageAlignment);
-      return new RefScRingBufferWrapper<>(ringBuffer, refFactory);
+      final FastFlowScRingBuffer ringBuffer = with(type, bytes, messageAlignment);
+      return new RefFastFlowScRingBufferWrapper<>(ringBuffer, refFactory);
    }
 
-   public static RingBuffer cyclic(ByteBuffer bytes) {
-      return cyclic(bytes, DEFAULT_CYCLES);
-   }
-
-   public static RingBuffer cyclic(ByteBuffer bytes, int cycles) {
+   public static RingBuffer relaxed(ByteBuffer bytes, int cycles) {
       final int messageAlignment = MessageLayout.DEFAULT_ALIGNMENT;
-      return new MpscCycleRingBuffer(bytes, messageAlignment, cycles);
+      return new RelaxedMpFastFlowScRingBuffer(bytes, messageAlignment, cycles);
    }
 
    public static RingBuffer with(RingBufferType type, ByteBuffer bytes) {
@@ -75,15 +71,18 @@ public final class RingBuffers {
       return with(type, bytes, messageAlignment);
    }
 
-   private static ScRingBuffer with(RingBufferType type, ByteBuffer bytes, int messageAlignment) {
-      final ScRingBuffer ringBuffer;
+   private static FastFlowScRingBuffer with(RingBufferType type, ByteBuffer bytes, int messageAlignment) {
+      final FastFlowScRingBuffer ringBuffer;
       switch (type) {
 
          case SingleProducerSingleConsumer:
-            ringBuffer = new SpscRingBuffer(bytes, messageAlignment);
+            ringBuffer = new LamportSpFastFlowScRingBuffer(bytes, messageAlignment);
             break;
          case MultiProducerSingleConsumer:
-            ringBuffer = new MpscRingBuffer(bytes, messageAlignment);
+            ringBuffer = new LamportMpFastFlowScRingBuffer(bytes, messageAlignment);
+            break;
+         case RelaxedMultiProducerSingleConsumer:
+            ringBuffer = new RelaxedMpFastFlowScRingBuffer(bytes, messageAlignment, DEFAULT_CYCLES);
             break;
          default:
             throw new AssertionError("unsupported case!");
@@ -95,14 +94,14 @@ public final class RingBuffers {
       return BytesUtils.nextPowOf2((int) BytesUtils.align(MessageLayout.HEADER_LENGTH + messageLength, MessageLayout.DEFAULT_ALIGNMENT));
    }
 
-   public static int capacity(int messages, int messageLength) {
+   public static int capacity(RingBufferType type, int messages, int messageLength) {
       final int messageAlignment = messageAlignment(messageLength);
       final int bytes = messages * messageAlignment;
-      return capacity(bytes);
+      return capacity(type, bytes);
    }
 
    public enum RingBufferType {
-      SingleProducerSingleConsumer, MultiProducerSingleConsumer
+      SingleProducerSingleConsumer, MultiProducerSingleConsumer, RelaxedMultiProducerSingleConsumer
    }
 
 }

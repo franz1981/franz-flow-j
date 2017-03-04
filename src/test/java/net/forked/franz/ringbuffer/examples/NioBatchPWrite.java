@@ -59,10 +59,10 @@ public class NioBatchPWrite {
       final int capacity = 32 * 1024;
       final int maxUnflushedMessages = capacity / messageSize;
 
-      final int totalSize = RingBuffers.capacity(capacity) + UnsafeAccess.UNSAFE.pageSize();
+      final int totalSize = RingBuffers.capacity(ringBufferType, capacity) + UnsafeAccess.UNSAFE.pageSize();
       ByteBuffer ringBufferBytes = ByteBuffer.allocateDirect(totalSize);
       ringBufferBytes.position(BytesUtils.alignedIndex(ringBufferBytes, 0, UnsafeAccess.UNSAFE.pageSize()));
-      ringBufferBytes.limit(ringBufferBytes.position() + RingBuffers.capacity(capacity));
+      ringBufferBytes.limit(ringBufferBytes.position() + RingBuffers.capacity(ringBufferType, capacity));
       ringBufferBytes = ringBufferBytes.slice();
       final RingBuffer fileRingBuffer = RingBuffers.with(ringBufferType, ringBufferBytes);
       final Path tmpFile;

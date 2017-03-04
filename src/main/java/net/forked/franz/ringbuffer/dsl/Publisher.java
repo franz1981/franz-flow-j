@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 
 import net.forked.franz.ringbuffer.MessageRefTranslator;
 import net.forked.franz.ringbuffer.RefRingBuffer;
+
 public final class Publisher<T, C> {
 
    private final RefRingBuffer<Holder<C>> ringBuffer;

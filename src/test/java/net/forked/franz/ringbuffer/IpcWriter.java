@@ -35,7 +35,7 @@ public class IpcWriter {
       final int messages = 100_000_000;
       final File sharedFolder = new File("/dev/shm");
       final String sharedFileName = "shared.ipc";
-      final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.MultiProducerSingleConsumer;
+      final RingBuffers.RingBufferType ringBufferType = RingBuffers.RingBufferType.RelaxedMultiProducerSingleConsumer;
       final File sharedFile = new File(sharedFolder, sharedFileName);
       if (!sharedFile.exists()) {
          throw new IllegalStateException("shared file doesn't exists!");

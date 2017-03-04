@@ -53,7 +53,7 @@ public final class Channel<E, D, C> {
                                                        int averageMarshalledSize,
                                                        IntFunction<? extends ByteBuffer> bytesFactory) {
 
-      final int bytesCapacity = RingBuffers.capacity(capacity, averageMarshalledSize);
+      final int bytesCapacity = RingBuffers.capacity(type, capacity, averageMarshalledSize);
       final ByteBuffer byteBuffer = bytesFactory.apply(bytesCapacity);
       byteBuffer.order(ByteOrder.nativeOrder());
       final RefRingBuffer<Holder<C>> ringBuffer = RingBuffers.withRef(type, byteBuffer, Holder::new, averageMarshalledSize);
